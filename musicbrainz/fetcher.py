@@ -2,6 +2,7 @@ import requests
 import time
 import logging
 import pandas as pd
+from datetime import datetime
 
 logger = logging.getLogger("MusicBrainzFetcher")
 logger.setLevel(logging.INFO)
@@ -50,13 +51,28 @@ class MusicBrainzFetcher:
         logger.info(f"{len(releases)} total releases")
         return releases
 
+    def normalize_date(self, date_str):
+        if not date_str:
+            return "unknown"
+        try:
+            parsed = datetime.strptime(date_str, "%Y-%m-%d")
+            return parsed.date().isoformat()
+        except:
+            try:
+                parsed = datetime.strptime(date_str, "%Y-%m")
+                return parsed.date().isoformat()
+            except:
+                try:
+                    parsed = datetime.strptime(date_str, "%Y")
+                    return parsed.date().isoformat()
+                except:
+                    return "unknown"
+
     def fetch_tracks_with_dates(self, releases):
         rows = []
         for idx, r in enumerate(releases):
-            date = r.get("date")
-            if not date:
-                continue
-            logger.info(f"[{idx+1}/{len(releases)}] Processing release: {r['id']} ({date})")
+            raw_date = r.get("date")
+            date = self.normalize_date(raw_date)
             for media in r.get("media", []):
                 for track in media.get("tracks", []):
                     rows.append({
@@ -73,5 +89,7 @@ class MusicBrainzFetcher:
         releases = self.fetch_all_releases(mbid)
         data = self.fetch_tracks_with_dates(releases)
         df = pd.DataFrame(data)
+        df["sort_date"] = df["release_date"].apply(lambda x: x if x != "unknown" else "9999-12-31")
+        df = df.sort_values("sort_date", ascending=False).drop(columns="sort_date").reset_index(drop=True)
         logger.info(f"Created DataFrame with {len(df)} rows")
         return df
