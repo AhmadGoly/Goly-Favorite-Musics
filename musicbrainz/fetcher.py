@@ -1,79 +1,77 @@
 import requests
-import pandas as pd
 import time
 import logging
+import pandas as pd
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("MusicBrainzFetcher")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+logger.addHandler(handler)
 
 class MusicBrainzFetcher:
-    def __init__(self):
-        self.base = "https://musicbrainz.org/ws/2"
-        self.headers = {"User-Agent": "MusicFetcher/1.0 (email@example.com)"}
-        self.rate = 1
+    def __init__(self, rate_limit=1.0):
+        self.base_url = "https://musicbrainz.org/ws/2"
+        self.rate = rate_limit
 
-    def _get(self, path, params):
+    def _get(self, endpoint, params):
         time.sleep(self.rate)
-        return requests.get(f"{self.base}/{path}", params=params, headers=self.headers).json()
+        url = f"{self.base_url}/{endpoint}"
+        res = requests.get(url, params=params, headers={"User-Agent": "MusicFetcher/1.0 (test@example.com)"})
+        res.raise_for_status()
+        return res.json()
 
-    def fetch_artist_mbid(self, name):
+    def search_artist_mbid(self, name):
         logger.info(f"Searching artist: {name}")
-        js = self._get("artist", {"query": f'artist:"{name}"', "fmt": "json", "limit": 1})
-        if artists := js.get("artists"):
-            mbid = artists[0]["id"]
-            logger.info(f"MBID: {mbid}")
-            return mbid
-        logger.warning("Not found")
-        return None
+        js = self._get("artist", {"query": name, "fmt": "json"})
+        if not js.get("artists"):
+            raise ValueError("Artist not found")
+        mbid = js["artists"][0]["id"]
+        logger.info(f"MBID: {mbid}")
+        return mbid
 
     def fetch_all_releases(self, mbid):
         logger.info(f"Browse releases: {mbid}")
-        releases, ofs = [], 0
+        releases, offset = [], 0
         while True:
             js = self._get("release", {
                 "artist": mbid,
                 "fmt": "json",
                 "limit": 100,
-                "offset": ofs,
-                "inc": "release-groups"
+                "offset": offset,
+                "inc": "recordings+media"
             })
             batch = js.get("releases", [])
             releases.extend(batch)
-            logger.info(f"{len(batch)} releases @offset {ofs}")
+            logger.info(f"{len(batch)} releases @offset {offset}")
             if len(batch) < 100:
                 break
-            ofs += 100
+            offset += 100
         logger.info(f"{len(releases)} total releases")
         return releases
 
     def fetch_tracks_with_dates(self, releases):
         rows = []
         for idx, r in enumerate(releases):
-            rid, date = r["id"], r.get("date")
+            date = r.get("date")
             if not date:
                 continue
-            logger.info(f"[{idx+1}/{len(releases)}] Fetching release: {rid} ({date})")
-            try:
-                js = self._get(f"release/{rid}", {"fmt": "json", "inc": "recordings"})
-                for m in js.get("media", []):
-                    for t in m.get("tracks", []):
-                        rows.append({
-                            "track_title": t["title"],
-                            "recording_id": t["recording"]["id"],
-                            "release_id": rid,
-                            "release_date": date
-                        })
-            except Exception as e:
-                logger.warning(f"Failed to fetch release {rid}: {e}")
+            logger.info(f"[{idx+1}/{len(releases)}] Processing release: {r['id']} ({date})")
+            for media in r.get("media", []):
+                for track in media.get("tracks", []):
+                    rows.append({
+                        "track_title": track["title"],
+                        "recording_id": track["recording"]["id"],
+                        "release_id": r["id"],
+                        "release_date": date
+                    })
         return rows
 
-
-    def fetch_artist_tracks(self, name):
-        mbid = self.fetch_artist_mbid(name)
-        if not mbid:
-            return pd.DataFrame()
+    def fetch_artist_tracks_df(self, artist_name):
+        logger.info(f"Starting fetch for artist: {artist_name}")
+        mbid = self.search_artist_mbid(artist_name)
         releases = self.fetch_all_releases(mbid)
-        rows = self.fetch_tracks_with_dates(releases)
-        df = pd.DataFrame(rows)
-        logger.info(f"{len(df)} tracks with dates")
+        data = self.fetch_tracks_with_dates(releases)
+        df = pd.DataFrame(data)
+        logger.info(f"Created DataFrame with {len(df)} rows")
         return df
