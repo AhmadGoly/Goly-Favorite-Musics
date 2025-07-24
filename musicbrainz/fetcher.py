@@ -90,6 +90,9 @@ class MusicBrainzFetcher:
         data = self.fetch_tracks_with_dates(releases)
         df = pd.DataFrame(data)
         df["sort_date"] = df["release_date"].apply(lambda x: x if x != "unknown" else "9999-12-31")
+        df = df.sort_values("sort_date")  # oldest first
+        df = df.drop_duplicates("track_title", keep="first")
         df = df.sort_values("sort_date", ascending=False).drop(columns="sort_date").reset_index(drop=True)
+
         logger.info(f"Created DataFrame with {len(df)} rows")
         return df
