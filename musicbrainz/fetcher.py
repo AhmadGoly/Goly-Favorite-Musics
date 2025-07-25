@@ -83,7 +83,7 @@ class MusicBrainzFetcher:
                     })
         return rows
 
-    def fetch_artist_tracks_df(self, artist_name):
+    def fetch_artist_tracks_df(self, artist_name, limit=None):
         logger.info(f"Starting fetch for artist: {artist_name}")
         mbid = self.search_artist_mbid(artist_name)
         releases = self.fetch_all_releases(mbid)
@@ -94,5 +94,9 @@ class MusicBrainzFetcher:
         df = df.drop_duplicates("track_title", keep="first")
         df = df.sort_values("sort_date", ascending=False).drop(columns="sort_date").reset_index(drop=True)
 
+        if limit is not None:
+            df = df.head(limit)
+
         logger.info(f"Created DataFrame with {len(df)} rows")
         return df
+
